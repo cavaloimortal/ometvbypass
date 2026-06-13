@@ -445,12 +445,10 @@ class BrowserWindow(QMainWindow):
         self.st = QLabel("Starting Tor..."); self.st.setObjectName("st")
         hl.addWidget(self.st); hl.addStretch()
 
-        sid_label = QLabel(f"SID {self.sid[:8]}"); sid_label.setObjectName("sid")
-        hl.addWidget(sid_label); hl.addSpacing(8)
+        self.lb = QLabel(f"SID {self.sid[:8]}"); self.lb.setObjectName("sid")
+        hl.addWidget(self.lb); hl.addSpacing(8)
 
         for t, cb, kind in [
-            ("New IP", self._newid, ""),
-            ("Reload", lambda: self.bw.reload(), ""),
             ("New Session", self._reset, "danger"),
         ]:
             b = QPushButton(t); b.setObjectName(f"btn_{kind}" if kind else "btn")
@@ -463,8 +461,7 @@ class BrowserWindow(QMainWindow):
         # ── Menu ──
         m = self.menuBar(); m.setObjectName("mb")
         sm = m.addMenu("Session")
-        for t,cb in [("New IP (Tor)", self._newid), ("New Session", self._reset)]:
-            a=QAction(t,self); a.triggered.connect(cb); sm.addAction(a)
+        a=QAction("New Session",self); a.triggered.connect(self._reset); sm.addAction(a)
         sm.addSeparator(); a=QAction("Exit",self); a.triggered.connect(self.close); sm.addAction(a)
         h=m.addMenu("Help")
         a=QAction("About",self); a.triggered.connect(self._about); h.addAction(a)
@@ -522,9 +519,6 @@ class BrowserWindow(QMainWindow):
             self._update_indicator("green")
             self.bw.load(QUrl(OME_URL))
 
-    def _load(self):
-        self._wait_for_tor()
-
     def _newid(self):
         try:
             with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
@@ -542,7 +536,7 @@ class BrowserWindow(QMainWindow):
         self.sid = uuid.uuid4().hex[:12]; self.ua = random.choice(self._uas)
         self.lb.setText(f"SID: {self.sid[:8]}")
         self.bw.setPage(None); self.prof.deleteLater()
-        self._profile(); self._load()
+        self._profile(); self._wait_for_tor()
         if od and od.exists():
             threading.Thread(target=lambda: shutil.rmtree(od, ignore_errors=True), daemon=True).start()
 
