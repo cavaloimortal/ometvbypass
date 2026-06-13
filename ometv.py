@@ -1,9 +1,11 @@
-# OmeTV Clean Browser v3.0
+# OmeTV Clean Browser v3.1
 # Download, setup and run - all in one file.
 
 import os, sys, shutil, socket, subprocess, tarfile, tempfile
 import threading, time, uuid, random, urllib.request, json
+import struct, select
 from pathlib import Path
+from urllib.parse import urlparse
 
 # ── Config ──────────────────────────────────────────────────────────
 OME_URL = "https://ome.tv"
@@ -14,8 +16,137 @@ BASE    = Path(__file__).parent.resolve()
 TOR_DIR = BASE / "tor"
 TOR_EXE = TOR_DIR / "tor.exe"
 TOR_LOG = TOR_DIR / "tor.log"
+PROXY_PORT = 8080
 
 DEPS = ["PyQt6", "PyQt6-WebEngine", "stem"]
+
+# ── Local proxy: only .ome.tv through Tor ────────────────────────────
+
+def socks5_connect(host, port, proxy_host="127.0.0.1", proxy_port=9050):
+    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    s.settimeout(15)
+    try:
+        s.connect((proxy_host, proxy_port))
+        s.sendall(bytes([5, 1, 0]))
+        data = s.recv(2)
+        if data != bytes([5, 0]):
+            raise ConnectionError("SOCKS5 auth failed")
+        host_bytes = host.encode("idna")
+        req = bytes([5, 1, 0, 3, len(host_bytes)]) + host_bytes + struct.pack(">H", port)
+        s.sendall(req)
+        resp = s.recv(4)
+        if resp[1] != 0:
+            s.close()
+            raise ConnectionError(f"SOCKS5 connect error {resp[1]}")
+        if resp[3] == 1:
+            s.recv(6)
+        elif resp[3] == 3:
+            alen = s.recv(1)[0]
+            s.recv(alen + 2)
+        elif resp[3] == 4:
+            s.recv(18)
+        s.settimeout(None)
+        return s
+    except:
+        s.close()
+        raise
+
+
+def start_local_proxy(tor_host="127.0.0.1", tor_port=9050, listen_port=PROXY_PORT):
+    import socketserver
+
+    def use_tor(host):
+        h = host.lower().strip(".")
+        return h == "ome.tv" or h.endswith(".ome.tv")
+
+    class ProxyHandler(socketserver.StreamRequestHandler):
+        def handle(self):
+            try:
+                first = self.rfile.readline()
+                if not first:
+                    return
+                if first.startswith(b"CONNECT "):
+                    parts = first.split()
+                    hp = parts[1].decode()
+                    h, _, p = hp.partition(":")
+                    p = int(p) if p else 443
+                    while self.rfile.readline() != b"\r\n":
+                        pass
+                    self._tunnel(h, p)
+                else:
+                    self._http(first)
+            except:
+                pass
+
+        def _tunnel(self, host, port):
+            try:
+                if use_tor(host):
+                    remote = socks5_connect(host, port, tor_host, tor_port)
+                else:
+                    remote = socket.create_connection((host, port), timeout=15)
+                self.request.sendall(b"HTTP/1.1 200 Connection Established\r\n\r\n")
+                _relay(self.request, remote)
+            except:
+                try: self.request.sendall(b"HTTP/1.1 502 Bad Gateway\r\n\r\n")
+                except: pass
+
+        def _http(self, first):
+            try:
+                parts = first.split()
+                if len(parts) < 2:
+                    return
+                url = parts[1].decode()
+                parsed = urlparse(url)
+                host, port = parsed.hostname, parsed.port or 80
+                if not host:
+                    return
+                path = parsed.path or "/"
+                if parsed.query:
+                    path += "?" + parsed.query
+                new_first = f"{parts[0].decode()} {path} HTTP/1.1\r\n".encode()
+                rest = b""
+                while True:
+                    line = self.rfile.readline()
+                    rest += line
+                    if line == b"\r\n" or not line:
+                        break
+                if use_tor(host):
+                    remote = socks5_connect(host, port, tor_host, tor_port)
+                else:
+                    remote = socket.create_connection((host, port), timeout=15)
+                remote.sendall(new_first + rest)
+                _relay(self.request, remote)
+            except:
+                pass
+
+    def _relay(s1, s2):
+        s1.settimeout(None); s2.settimeout(None)
+        socks = [s1, s2]
+        try:
+            while True:
+                r, _, _ = select.select(socks, [], [], 30)
+                if not r:
+                    break
+                for s in r:
+                    d = s.recv(65536)
+                    if not d:
+                        return
+                    (s2 if s is s1 else s1).sendall(d)
+        except:
+            pass
+        finally:
+            try: s1.close()
+            except: pass
+            try: s2.close()
+            except: pass
+
+    sv = socketserver.ThreadingTCPServer(("127.0.0.1", listen_port), ProxyHandler)
+    sv.daemon_threads = True
+    sv.allow_reuse_address = True
+    t = threading.Thread(target=sv.serve_forever, daemon=True)
+    t.start()
+    return sv
+
 
 # ── Setup UI (tkinter - no external deps) ────────────────────────────
 
@@ -123,7 +254,6 @@ def _install_python_deps(ui):
         ui.update(f"Installing {pkg} ({i+1}/{total})...")
         r = subprocess.run(cmd + [pkg], capture_output=True, timeout=180)
         if r.returncode != 0:
-            # Try without --user
             r2 = subprocess.run(cmd[:-1] + [pkg], capture_output=True, timeout=180)
             if r2.returncode != 0:
                 err = (r.stderr + r2.stderr).decode("utf-8", errors="ignore")[:200]
@@ -210,8 +340,8 @@ def start_tor():
 # ── Browser (PyQt6) ──────────────────────────────────────────────────
 
 os.environ["QTWEBENGINE_CHROMIUM_FLAGS"] = (
-    "--proxy-server=socks5://127.0.0.1:9050 "
-    "--proxy-bypass-list=*.facebook.com;*.fbcdn.net;*.google.com;*.googleapis.com;*.gstatic.com;*.googleusercontent.com "
+    f"--proxy-server=http://127.0.0.1:{PROXY_PORT} "
+    "--proxy-bypass-list=127.0.0.1;localhost "
     "--disable-blink-features=AutomationControlled "
     "--disable-webrtc-hw-encoding "
     "--force-webrtc-ip-handling-policy=disable_non_proxied_udp "
@@ -220,7 +350,7 @@ os.environ["QTWEBENGINE_CHROMIUM_FLAGS"] = (
     "--disable-component-update --no-first-run"
 )
 
-from PyQt6.QtCore import QUrl, Qt, QTimer, pyqtSignal
+from PyQt6.QtCore import QUrl, Qt, QTimer
 from PyQt6.QtGui import QAction
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
@@ -230,22 +360,21 @@ from PyQt6.QtWebEngineWidgets import QWebEngineView
 from PyQt6.QtWebEngineCore import QWebEngineProfile, QWebEnginePage, QWebEngineSettings
 
 
-class LoginPage(QWebEnginePage):
-    redirect_main = pyqtSignal(QUrl)
-
+class MainPage(QWebEnginePage):
     def __init__(self, profile, parent=None):
         super().__init__(profile, parent)
         self._popups = []
 
     def createWindow(self, wtype):
-        types = (QWebEnginePage.WebWindowType.WebBrowserTab,
-                 QWebEnginePage.WebWindowType.WebBrowserBackgroundTab,
-                 QWebEnginePage.WebWindowType.WebDialog)
-        if wtype in types:
+        if wtype in (
+            QWebEnginePage.WebWindowType.WebBrowserTab,
+            QWebEnginePage.WebWindowType.WebBrowserBackgroundTab,
+            QWebEnginePage.WebWindowType.WebDialog,
+        ):
             pw = QWebEngineView()
             pw.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, True)
             popup_page = QWebEnginePage(self.profile(), pw)
-            popup_page.urlChanged.connect(lambda url, v=pw: self._check_popup(url, v))
+            popup_page.windowCloseRequested.connect(pw.close)
             pw.setPage(popup_page)
             pw.setMinimumSize(700, 500)
             pw.resize(800, 600)
@@ -257,12 +386,6 @@ class LoginPage(QWebEnginePage):
             pw.destroyed.connect(lambda w=pw: self._popups.remove(w) if w in self._popups else None)
             return popup_page
         return super().createWindow(wtype)
-
-    def _check_popup(self, url, view):
-        url_str = url.toString()
-        if "ome.tv" in url_str or "ome.tv" in url_str:
-            self.redirect_main.emit(url)
-            view.close()
 
 
 class BrowserWindow(QMainWindow):
@@ -315,7 +438,7 @@ class BrowserWindow(QMainWindow):
         h=m.addMenu("Help")
         a=QAction("About",self); a.triggered.connect(lambda:
             QMessageBox.about(self,"OmeTV Clean Browser",
-                "OmeTV Clean Browser v3.0\n\nChromium + Tor embutido.\nAuto-reset a cada sessao.\nLogin OAuth liberado.")); h.addAction(a)
+                "OmeTV Clean Browser v3.1\n\nChromium + Tor embutido.\nAuto-reset a cada sessao.\nLogin OAuth liberado.")); h.addAction(a)
 
         sb=QStatusBar(); sb.setObjectName("sb"); self.setStatusBar(sb)
         sb.showMessage(f"Session: {self.sid}",0)
@@ -337,12 +460,8 @@ class BrowserWindow(QMainWindow):
         s.setAttribute(QWebEngineSettings.WebAttribute.ErrorPageEnabled, True)
         s.setAttribute(QWebEngineSettings.WebAttribute.LocalContentCanAccessRemoteUrls, True)
 
-        self._page = LoginPage(self.prof, self.bw)
-        self._page.redirect_main.connect(self._on_redirect)
+        self._page = MainPage(self.prof, self.bw)
         self.bw.setPage(self._page)
-
-    def _on_redirect(self, url):
-        self.bw.load(url)
 
     def _load(self):
         self.bw.load(QUrl(OME_URL))
@@ -390,7 +509,7 @@ def cleanup_system():
 
 def main():
     print("="*50)
-    print("  OmeTV Clean Browser v3.0")
+    print("  OmeTV Clean Browser v3.1")
     print("="*50)
 
     need_setup = False
@@ -416,6 +535,9 @@ def main():
 
     tor_proc = start_tor()
     print("  + Tor connected")
+
+    proxy = start_local_proxy()
+    print(f"  + Local proxy on 127.0.0.1:{PROXY_PORT}")
 
     app = QApplication(sys.argv)
     app.setStyle("Fusion")
