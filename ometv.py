@@ -1,4 +1,4 @@
-# OmeTV Clean Browser v3.1
+# OmeTV Clean Browser v3.2
 # Download, setup and run - all in one file.
 
 import os, sys, shutil, socket, subprocess, tarfile, tempfile
@@ -161,39 +161,39 @@ class SetupUI:
         from tkinter import ttk
         self.root = tk.Tk()
         self.root.title("OmeTV Clean Browser - Setup")
-        self.root.geometry("520x300")
+        self.root.geometry("480x260")
         self.root.resizable(False, False)
-        self.root.configure(bg="#1a1a2e")
+        self.root.configure(bg="#0a0a1a")
 
         try: self.root.iconbitmap(default="")
         except: pass
 
         cx = self.root.winfo_screenwidth()
         cy = self.root.winfo_screenheight()
-        self.root.geometry(f"+{cx//2-260}+{cy//2-150}")
+        self.root.geometry(f"+{cx//2-240}+{cy//2-130}")
 
-        container = tk.Frame(self.root, bg="#1a1a2e")
-        container.pack(expand=True, fill="both", padx=30, pady=25)
+        container = tk.Frame(self.root, bg="#0a0a1a")
+        container.pack(expand=True, fill="both", padx=28, pady=22)
 
         tk.Label(container, text="OmeTV Clean Browser",
-                 font=("Segoe UI", 20, "bold"),
-                 fg="#e94560", bg="#1a1a2e").pack(anchor="w")
+                 font=("Segoe UI", 18, "bold"),
+                 fg="#a78bfa", bg="#0a0a1a").pack(anchor="w")
 
         tk.Label(container, text="Installing dependencies...\nThis may take a few minutes.",
                  font=("Segoe UI", 10),
-                 fg="#94a3b8", bg="#1a1a2e", justify="left").pack(anchor="w", pady=(6, 16))
+                 fg="#7a7a9a", bg="#0a0a1a", justify="left").pack(anchor="w", pady=(6, 14))
 
         self.status = tk.Label(container, text="Preparing...",
                                font=("Segoe UI", 9),
-                               fg="#c0c0d0", bg="#1a1a2e", anchor="w")
+                               fg="#a0a0c0", bg="#0a0a1a", anchor="w")
         self.status.pack(fill="x")
 
         style = ttk.Style()
         style.theme_use("clam")
         style.configure("green.Horizontal.TProgressbar",
-                        troughcolor="#0f3460", background="#4ade80",
-                        bordercolor="#0f3460", lightcolor="#4ade80",
-                        darkcolor="#4ade80")
+                        troughcolor="#1a1a3a", background="#a78bfa",
+                        bordercolor="#1a1a3a", lightcolor="#a78bfa",
+                        darkcolor="#7c5cbf")
 
         self.bar = ttk.Progressbar(container, mode="indeterminate",
                                    style="green.Horizontal.TProgressbar")
@@ -430,37 +430,68 @@ class BrowserWindow(QMainWindow):
     def _ui(self):
         self.setWindowTitle("OmeTV Clean Browser")
         self.resize(1280, 720)
-        self.setMinimumSize(800, 550)
+        self.setMinimumSize(900, 580)
 
         c = QWidget(); self.setCentralWidget(c)
         l = QVBoxLayout(c); l.setContentsMargins(0,0,0,0); l.setSpacing(0)
 
-        bar = QFrame(); bar.setObjectName("bar"); bar.setFixedHeight(44)
-        hl = QHBoxLayout(bar); hl.setContentsMargins(8,4,8,4)
-        logo = QLabel("OmeTV Clean"); logo.setObjectName("logo"); hl.addWidget(logo)
+        # ── Top bar ──
+        bar = QFrame(); bar.setObjectName("bar"); bar.setFixedHeight(48)
+        hl = QHBoxLayout(bar); hl.setContentsMargins(14,0,10,0); hl.setSpacing(0)
+
+        logo = QLabel("OmeTV Clean"); logo.setObjectName("logo")
+        hl.addWidget(logo); hl.addSpacing(10)
+
+        self.indicator = QLabel(); self.indicator.setObjectName("indicator")
+        self.indicator.setFixedSize(8, 8); hl.addWidget(self.indicator); hl.addSpacing(6)
+
         self.st = QLabel("Starting Tor..."); self.st.setObjectName("st")
         hl.addWidget(self.st); hl.addStretch()
-        self.lb = QLabel(f"SID: {self.sid[:8]}"); self.lb.setObjectName("sid")
-        hl.addWidget(self.lb); hl.addSpacing(6)
 
-        for t, cb in [("New IP", self._newid), ("Reload", lambda: self.bw.reload()), ("New Session", self._reset)]:
-            b = QPushButton(t); b.setObjectName("btnr" if t=="New Session" else "btn")
+        sid_label = QLabel(f"SID {self.sid[:8]}"); sid_label.setObjectName("sid")
+        hl.addWidget(sid_label); hl.addSpacing(8)
+
+        for t, cb, kind in [
+            ("New IP", self._newid, ""),
+            ("Reload", lambda: self.bw.reload(), ""),
+            ("New Session", self._reset, "danger"),
+        ]:
+            b = QPushButton(t); b.setObjectName(f"btn_{kind}" if kind else "btn")
+            b.setCursor(Qt.CursorShape.PointingHandCursor)
             b.clicked.connect(cb); hl.addWidget(b)
 
         l.addWidget(bar)
         self.bw = QWebEngineView(); l.addWidget(self.bw)
 
-        m = self.menuBar(); sm = m.addMenu("Session")
+        # ── Menu ──
+        m = self.menuBar(); m.setObjectName("mb")
+        sm = m.addMenu("Session")
         for t,cb in [("New IP (Tor)", self._newid), ("New Session", self._reset)]:
             a=QAction(t,self); a.triggered.connect(cb); sm.addAction(a)
         sm.addSeparator(); a=QAction("Exit",self); a.triggered.connect(self.close); sm.addAction(a)
         h=m.addMenu("Help")
-        a=QAction("About",self); a.triggered.connect(lambda:
-            QMessageBox.about(self,"OmeTV Clean Browser",
-                "OmeTV Clean Browser v3.1\n\nChromium + Tor embutido.\nAuto-reset a cada sessao.\nLogin OAuth liberado.")); h.addAction(a)
+        a=QAction("About",self); a.triggered.connect(self._about); h.addAction(a)
 
+        # ── Status bar ──
         sb=QStatusBar(); sb.setObjectName("sb"); self.setStatusBar(sb)
-        sb.showMessage(f"Session: {self.sid}",0)
+        self.sb_label = QLabel(f"Session {self.sid}")
+        self.sb_label.setObjectName("sbl")
+        sb.addPermanentWidget(self.sb_label)
+
+        self._update_indicator("yellow")
+
+    def _update_indicator(self, color):
+        colors = {"green": "#4ade80", "yellow": "#eab308", "red": "#e94560"}
+        c = colors.get(color, "#eab308")
+        self.indicator.setStyleSheet(f"background:{c};border-radius:4px;")
+        self.indicator.setToolTip({"green":"Connected","yellow":"Starting...","red":"Error"}.get(color, ""))
+
+    def _about(self):
+        QMessageBox.about(self, "OmeTV Clean Browser",
+            "OmeTV Clean Browser v3.2\n\n"
+            "Chromium engine + embedded Tor.\n"
+            "Auto-reset session on every run.\n"
+            "OAuth login with local proxy.")
 
     def _profile(self):
         self.temp_dir = Path(tempfile.mkdtemp(prefix=f"ometv_{self.sid}_"))
@@ -483,6 +514,8 @@ class BrowserWindow(QMainWindow):
         self.bw.setPage(self._page)
 
     def _load(self):
+        self.st.setText("Connected")
+        self._update_indicator("green")
         self.bw.load(QUrl(OME_URL))
 
     def _newid(self):
@@ -528,7 +561,7 @@ def cleanup_system():
 
 def main():
     print("="*50)
-    print("  OmeTV Clean Browser v3.1")
+    print("  OmeTV Clean Browser v3.2")
     print("="*50)
 
     need_setup = False
@@ -561,20 +594,33 @@ def main():
     app = QApplication(sys.argv)
     app.setStyle("Fusion")
     app.setStyleSheet("""
-        QMainWindow{background:#1a1a2e}
-        #bar{background:#16213e;border-bottom:1px solid #0f3460}
-        #logo{color:#e94560;font-size:15px;font-weight:bold;padding:0 6px}
-        #st{color:#4ade80;font-size:12px}
-        #sid{color:#64748b;font-size:11px}
-        QPushButton#btn{background:#0f3460;color:#e0e0e0;border:none;padding:5px 12px;border-radius:3px;font-size:11px}
-        QPushButton#btn:hover{background:#1a4a8a}
-        QPushButton#btnr{background:#e94560;color:#fff;border:none;padding:5px 12px;border-radius:3px;font-size:11px;font-weight:bold}
-        QPushButton#btnr:hover{background:#c73650}
-        #sb{background:#16213e;color:#94a3b8;border-top:1px solid #0f3460;font-size:11px}
-        QMenuBar{background:#0f0f23;color:#c0c0d0;border-bottom:1px solid #0f3460}
-        QMenuBar::item:selected{background:#0f3460}
-        QMenu{background:#16213e;color:#c0c0d0;border:1px solid #0f3460}
-        QMenu::item:selected{background:#0f3460}
+        QMainWindow{background:#0a0a1a}
+        QWidget{color:#e0e0f0;font-family:Segoe UI,sans-serif;font-size:12px}
+
+        #bar{background:qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 #12122a,stop:1 #1a1a3a);border-bottom:1px solid #2a2a4a}
+        #logo{color:#a78bfa;font-size:14px;font-weight:700;letter-spacing:.5px}
+        #st{color:#94a3b8;font-size:11px}
+        #sid{background:#1e1e3a;color:#7c7caa;border-radius:8px;padding:3px 10px;font-size:10px;font-weight:600;font-family:Consolas,monospace}
+
+        QPushButton#btn{background:#1e1e3e;color:#c0c0e0;border:1px solid #2e2e5e;padding:6px 14px;border-radius:6px;font-size:11px;font-weight:500}
+        QPushButton#btn:hover{background:#2a2a5a;border-color:#4a4a8a;color:#fff}
+        QPushButton#btn:pressed{background:#3a3a6a}
+        QPushButton#btn_danger{background:#8b1a3a;color:#fff;border:none;padding:6px 14px;border-radius:6px;font-size:11px;font-weight:600}
+        QPushButton#btn_danger:hover{background:#b02050}
+        QPushButton#btn_danger:pressed{background:#6e142e}
+
+        #sb{background:#0d0d20;color:#6a6a8a;border-top:1px solid #1a1a3a;font-size:11px;padding:2px 10px}
+        #sbl{color:#5a5a7a;font-family:Consolas,monospace;font-size:10px}
+
+        QMenuBar{background:#0a0a1a;color:#8888b0;border-bottom:1px solid #1a1a3a;padding:2px}
+        QMenuBar::item{padding:4px 14px;border-radius:4px}
+        QMenuBar::item:selected{background:#1e1e3e;color:#fff}
+        QMenu{background:#12122a;color:#c0c0e0;border:1px solid #2a2a4a;border-radius:6px;padding:4px}
+        QMenu::item{padding:6px 24px;border-radius:4px}
+        QMenu::item:selected{background:#2a2a5a;color:#fff}
+        QMenu::separator{background:#2a2a4a;height:1px;margin:4px 12px}
+
+        QToolTip{background:#1e1e3e;color:#e0e0f0;border:1px solid #3a3a6a;border-radius:4px;padding:4px 8px;font-size:11px}
     """)
 
     w = BrowserWindow(); w.show()
