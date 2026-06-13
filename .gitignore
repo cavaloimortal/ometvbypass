@@ -1,0 +1,4 @@
+tor/data/
+tor/*.log
+__pycache__/
+*.pyc

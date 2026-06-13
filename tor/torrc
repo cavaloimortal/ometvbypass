@@ -1,0 +1,7 @@
+SOCKSPort 127.0.0.1:9050
+ControlPort 127.0.0.1:9051
+DataDirectory C:/Users/Croni/Documents/OMETV/tor/data
+CircuitBuildTimeout 30
+MaxCircuitDirtiness 600
+Log notice file C:/Users/Croni/Documents/OMETV/tor/tor.log
+AvoidDiskWrites 1
