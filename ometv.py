@@ -13,11 +13,7 @@ TOR_BV = "15.0.15"
 TOR_TGZ = f"tor-expert-bundle-windows-x86_64-{TOR_BV}.tar.gz"
 TOR_URL = f"https://dist.torproject.org/torbrowser/{TOR_BV}/{TOR_TGZ}"
 
-if getattr(sys, 'frozen', False):
-    BASE = Path(sys.executable).parent.resolve()
-else:
-    BASE = Path(__file__).parent.resolve()
-
+BASE = Path(os.environ.get("APPDATA", Path.home() / "AppData" / "Roaming")) / "OmeTVCleanBrowser"
 TOR_DIR = BASE / "tor"
 TOR_EXE = TOR_DIR / "tor.exe"
 TOR_LOG = TOR_DIR / "tor.log"
