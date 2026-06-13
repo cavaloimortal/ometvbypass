@@ -220,7 +220,7 @@ os.environ["QTWEBENGINE_CHROMIUM_FLAGS"] = (
     "--disable-component-update --no-first-run"
 )
 
-from PyQt6.QtCore import QUrl, Qt, QTimer
+from PyQt6.QtCore import QUrl, Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import QAction
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
@@ -231,9 +231,11 @@ from PyQt6.QtWebEngineCore import QWebEngineProfile, QWebEnginePage, QWebEngineS
 
 
 class LoginPage(QWebEnginePage):
+    redirect_main = pyqtSignal(QUrl)
+
     def __init__(self, profile, parent=None):
         super().__init__(profile, parent)
-        self.popups = []
+        self._popups = []
 
     def createWindow(self, wtype):
         types = (QWebEnginePage.WebWindowType.WebBrowserTab,
@@ -242,17 +244,25 @@ class LoginPage(QWebEnginePage):
         if wtype in types:
             pw = QWebEngineView()
             pw.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, True)
-            pw.setPage(LoginPage(self.profile(), pw))
+            popup_page = QWebEnginePage(self.profile(), pw)
+            popup_page.urlChanged.connect(lambda url, v=pw: self._check_popup(url, v))
+            pw.setPage(popup_page)
             pw.setMinimumSize(700, 500)
             pw.resize(800, 600)
             if self.parent() and self.parent().window():
                 c = self.parent().window().frameGeometry().center()
                 pw.move(c.x() - 400, c.y() - 300)
             pw.show()
-            self.popups.append(pw)
-            pw.destroyed.connect(lambda w=pw: self.popups.remove(w) if w in self.popups else None)
-            return pw.page()
+            self._popups.append(pw)
+            pw.destroyed.connect(lambda w=pw: self._popups.remove(w) if w in self._popups else None)
+            return popup_page
         return super().createWindow(wtype)
+
+    def _check_popup(self, url, view):
+        url_str = url.toString()
+        if "ome.tv" in url_str or "ome.tv" in url_str:
+            self.redirect_main.emit(url)
+            view.close()
 
 
 class BrowserWindow(QMainWindow):
@@ -327,7 +337,12 @@ class BrowserWindow(QMainWindow):
         s.setAttribute(QWebEngineSettings.WebAttribute.ErrorPageEnabled, True)
         s.setAttribute(QWebEngineSettings.WebAttribute.LocalContentCanAccessRemoteUrls, True)
 
-        self.bw.setPage(LoginPage(self.prof, self.bw))
+        self._page = LoginPage(self.prof, self.bw)
+        self._page.redirect_main.connect(self._on_redirect)
+        self.bw.setPage(self._page)
+
+    def _on_redirect(self, url):
+        self.bw.load(url)
 
     def _load(self):
         self.bw.load(QUrl(OME_URL))
