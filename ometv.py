@@ -404,9 +404,10 @@ class MainPage(QWebEnginePage):
 
 
 class BrowserWindow(QMainWindow):
-    def __init__(self):
+    def __init__(self, tor_ready=None, tor_proc=None):
         super().__init__()
-        self.tor_proc = None
+        self._tor_ready = tor_ready
+        self._tor_proc = tor_proc
         self.temp_dir = None
         self.sid = uuid.uuid4().hex[:12]
         self._uas = [
@@ -421,7 +422,7 @@ class BrowserWindow(QMainWindow):
         ])
         self._ui()
         self._profile()
-        self._load()
+        self._wait_for_tor()
 
     def _ui(self):
         self.setWindowTitle("OmeTV Clean Browser")
@@ -509,10 +510,20 @@ class BrowserWindow(QMainWindow):
         self._page = MainPage(self.prof, self.bw)
         self.bw.setPage(self._page)
 
+    def _wait_for_tor(self):
+        if self._tor_ready and self._tor_ready.is_set():
+            self.st.setText("Connected")
+            self._update_indicator("green")
+            self.bw.load(QUrl(OME_URL))
+        elif self._tor_ready:
+            QTimer.singleShot(150, self._wait_for_tor)
+        else:
+            self.st.setText("Connected")
+            self._update_indicator("green")
+            self.bw.load(QUrl(OME_URL))
+
     def _load(self):
-        self.st.setText("Connected")
-        self._update_indicator("green")
-        self.bw.load(QUrl(OME_URL))
+        self._wait_for_tor()
 
     def _newid(self):
         try:
@@ -545,14 +556,12 @@ class BrowserWindow(QMainWindow):
 # ── Main ─────────────────────────────────────────────────────────────
 
 def cleanup_system():
-    print("[*] Cleaning system...")
     try: subprocess.run(["ipconfig","/flushdns"],capture_output=True,check=True)
     except: pass
     try: subprocess.run(["netsh","int","ip","reset"],capture_output=True)
     except: pass
     try: subprocess.run(["netsh","winsock","reset"],capture_output=True)
     except: pass
-    print("  + System cleaned")
 
 
 def main():
@@ -575,15 +584,22 @@ def main():
         import importlib
         importlib.invalidate_caches()
 
-    cleanup_system()
-
     if not TOR_EXE.exists():
         print("[ERROR] Tor not found. Run again to download.")
         input("Press Enter..."); return
 
-    tor_proc = start_tor()
-    print("  + Tor connected")
+    # Deferred system cleanup (privacy) - doesn't block UI
+    threading.Thread(target=cleanup_system, daemon=True).start()
 
+    # Start Tor in parallel with UI creation
+    tor_ready = threading.Event()
+    tor_proc = [None]
+    def _start_tor_bg():
+        tor_proc[0] = start_tor()
+        tor_ready.set()
+    threading.Thread(target=_start_tor_bg, daemon=True).start()
+
+    # Start proxy immediately (independent of Tor)
     proxy = start_local_proxy()
     print(f"  + Local proxy on 127.0.0.1:{PROXY_PORT}")
 
@@ -619,7 +635,7 @@ def main():
         QToolTip{background:#1e1e3e;color:#e0e0f0;border:1px solid #3a3a6a;border-radius:4px;padding:4px 8px;font-size:11px}
     """)
 
-    w = BrowserWindow(); w.show()
+    w = BrowserWindow(tor_ready, tor_proc); w.show()
     sys.exit(app.exec())
 
 
