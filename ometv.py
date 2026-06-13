@@ -12,7 +12,12 @@ OME_URL = "https://ome.tv"
 TOR_BV = "15.0.15"
 TOR_TGZ = f"tor-expert-bundle-windows-x86_64-{TOR_BV}.tar.gz"
 TOR_URL = f"https://dist.torproject.org/torbrowser/{TOR_BV}/{TOR_TGZ}"
-BASE    = Path(__file__).parent.resolve()
+
+if getattr(sys, 'frozen', False):
+    BASE = Path(sys.executable).parent.resolve()
+else:
+    BASE = Path(__file__).parent.resolve()
+
 TOR_DIR = BASE / "tor"
 TOR_EXE = TOR_DIR / "tor.exe"
 TOR_LOG = TOR_DIR / "tor.log"
@@ -364,6 +369,20 @@ class MainPage(QWebEnginePage):
     def __init__(self, profile, parent=None):
         super().__init__(profile, parent)
         self._popups = []
+        try:
+            self.permissionRequested.connect(self._grant_perm)
+        except AttributeError:
+            pass
+
+    def _grant_perm(self, *args):
+        try:
+            if len(args) == 2:
+                self.setFeaturePermission(args[0], args[1],
+                    QWebEnginePage.PermissionPolicy.PermissionGrantedByUser)
+            elif len(args) == 1:
+                args[0].grant()
+        except:
+            pass
 
     def createWindow(self, wtype):
         if wtype in (

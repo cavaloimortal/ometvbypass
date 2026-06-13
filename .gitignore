@@ -1,4 +1,18 @@
+# Build artifacts
+build/
+dist/
+*.spec
+
+# Tor download
+tor/*.tar.gz
+tor/tor.exe
+tor/*.dll
 tor/data/
-tor/*.log
+tor/tor.log
+tor/torrc
+
+# Python cache
 __pycache__/
 *.pyc
+*.pyo
+*.egg-info/
